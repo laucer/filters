@@ -1,6 +1,8 @@
 #include<cstdio>
 #include "vector_types.h"
 #define pi 3.14159265359
+#define pos(x,y) ((x) + (y)*w)
+
 extern "C" {
 
 __global__ void convolution(unsigned char* src, int w, int h, char* convo, int convo_w, int convo_h, unsigned char* dst, bool normalize){
@@ -55,8 +57,8 @@ __global__ void convolution(unsigned char* src, int w, int h, char* convo, int c
 __global__ void sobel(unsigned char* l, unsigned char* magnitude, unsigned char* direction, int w, int h){
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
-	if (x >= w - 3 || y >= h - 3) return;
-	if (x < 2 || y < 2) return;
+	if (x >= w - 2 || y >= h - 2) return;
+	if (x < 1 || y < 1) return;
 
 	int dx = 0
 	+ l[(x - 1) + w * (y - 1)] - l[(x + 1) + w * (y - 1)]
@@ -71,7 +73,35 @@ __global__ void sobel(unsigned char* l, unsigned char* magnitude, unsigned char*
 	int dir = atan((double)dy/dx);
 
 	magnitude[x + y*w] = mag;
-	direction[x+ y*w] = dir * 180.0 / pi;
+	int degree = dir * 180.0 / pi;
+	if (degree < 0) degree += 180;
+	direction[x+ y*w] = degree;
+}
+
+__global__ void suppression(unsigned char* magnitude, unsigned char* direction, unsigned char* result_magnitude, int w, int h){
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	if (x >= w - 2 || y >= h - 2) return;
+	if (x < 1 || y < 1) return;
+
+	int degree = direction[x + y * w];
+	int mag = magnitude[x + y * w];
+	bool greatest = false;
+	if(degree < 22 || degree > 180 - 22){ // poziomo
+		if(mag > magnitude[pos(x-1, y)] && mag > magnitude[pos(x+1, y)]) greatest = true;
+	} else if (degree < 45+22){ // gora prawo
+		if(mag > magnitude[pos(x+1, y+1)] && mag > magnitude[pos(x-1, y-1)]) greatest = true;
+	} else if (degree < 90 + 22) { // pionowo
+		if(mag > magnitude[pos(x,y+1)] && mag > magnitude[pos(x, y-1)]) greatest = true;
+	} else { // gora lewo
+		if(mag > magnitude[pos(x-1,y+1)] && mag > magnitude[pos(x+1, y-1)]) greatest = true;
+	}
+
+	if(!greatest){
+		mag = 0;
+	}
+	result_magnitude[x + y * w] = mag;
+
 }
 
 __global__ void to_gray(unsigned char* red, unsigned char* green, unsigned char* blue, unsigned char* dst, int w, int h){

@@ -9,17 +9,17 @@ using namespace std;
 
 #define cro(x,y) (((x)+(y)-1) / y)
 
-CUfunction kconvolution, kgray, kmagnitude, ksobel;
+CUfunction kconvolution, kgray, kmagnitude, ksobel, ksuppression;
 
+void init_cuda();
+void store_img(unsigned char* red, unsigned char* green, unsigned char* blue, int w, int h);
 unsigned char* convolute(unsigned char* input, int w, int h, char* convo_matrix, int convo_w, int convo_h, bool normalize);
 unsigned char* gauss(unsigned char* input, int w, int h);
 unsigned char* to_gray(unsigned char* red, unsigned char* green, unsigned char* blue, int w, int h);
 void alternative_sobel(unsigned char* lum, unsigned char* mag, unsigned char* dir, int w, int h);
+unsigned char* suppression(unsigned char* mag, unsigned char* dir, int w, int h);
 
 
-void store_img(unsigned char* red, unsigned char* green, unsigned char* blue, int w, int h);
-
-void init_cuda();
 
 int main(){
   init_cuda();
@@ -32,6 +32,12 @@ int main(){
   unsigned char* c_green = new unsigned char[image_heigth * image_width];
   unsigned char* c_blue = new unsigned char[image_heigth * image_width];
 
+  unsigned char* c_luminosity = new unsigned char[image_heigth * image_width];
+  unsigned char* c_magnitude = new unsigned char[image_heigth * image_width];
+  unsigned char* c_direction = new unsigned char[image_heigth * image_width];
+  unsigned char* c_suppressed = new unsigned char[image_heigth * image_width];
+
+
 
   for(int y = 0; y < image_heigth; y++){
     for(int x = 0; x < image_width; x++){
@@ -42,13 +48,14 @@ int main(){
     }
   }
 
-  c_blue = to_gray(c_red, c_green, c_blue, image_width, image_heigth);
+  c_luminosity = to_gray(c_red, c_green, c_blue, image_width, image_heigth);
 
-  c_blue = gauss(c_blue, image_width, image_heigth);
+  c_luminosity = gauss(c_luminosity, image_width, image_heigth);
   //c_blue = sobel(c_blue, image_width, image_heigth);
-  alternative_sobel(c_blue, c_green, c_red, image_width, image_heigth);
+  alternative_sobel(c_luminosity, c_magnitude, c_direction, image_width, image_heigth);
+  c_suppressed = suppression(c_magnitude, c_direction, image_width, image_heigth);
 
-  store_img(c_green, c_green, c_green, image_width, image_heigth);
+  store_img(c_suppressed, c_suppressed, c_suppressed, image_width, image_heigth);
 
 }
 
@@ -111,6 +118,7 @@ void init_cuda(){
   cuModuleGetFunction(&kgray, m, "to_gray");
   cuModuleGetFunction(&kmagnitude, m, "get_magnitude");
   cuModuleGetFunction(&ksobel, m, "sobel");
+  cuModuleGetFunction(&ksuppression, m, "suppression");
 }
 
 unsigned char* to_gray(unsigned char* red, unsigned char* green, unsigned char* blue, int w, int h){
@@ -145,6 +153,37 @@ void alternative_sobel(unsigned char* lum, unsigned char* mag, unsigned char* di
   cuMemcpyDtoH(mag, m, w*h);
   cuMemcpyDtoH(dir, d, w*h);
 }
+
+unsigned char* suppression(unsigned char* mag, unsigned char* dir, int w, int h){
+  CUdeviceptr r, m, d;
+  cuMemAlloc(&r, w * h);
+  cuMemAlloc(&m, w * h);
+  cuMemAlloc(&d, w * h);
+  cuMemcpyHtoD(m, (const void*)mag, w * h);
+  cuMemcpyHtoD(d, (const void*)dir, w * h);
+  void* args[] = {&m, &d, &r, &w, &h};
+  cuLaunchKernel(ksuppression, cro(w,32), cro(h,32), 1, 32, 32, 1, 0, 0, args, 0);
+	cuCtxSynchronize();
+
+
+  unsigned char* result = new unsigned char[w*h];
+  cuMemcpyDtoH(result, r, w*h);
+  return result;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ///////////////// legacy
