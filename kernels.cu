@@ -5,7 +5,7 @@
 
 extern "C" {
 
-__global__ void convolution(unsigned char* src, int w, int h, char* convo, int convo_w, int convo_h, unsigned char* dst, bool normalize){
+__global__ void convolution(unsigned char* src, int w, int h, char* convo, int convo_w, int convo_h, unsigned char* dst){
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (x >= w || y >= h) return;
@@ -19,7 +19,7 @@ __global__ void convolution(unsigned char* src, int w, int h, char* convo, int c
 		}
 	} // end convo load
     __syncthreads();
-		int computed_pixel = 0;
+	int computed_pixel = 0;
 	int computed_weigth = 0;
 	int radius_x = convo_w / 2, radius_y = convo_h / 2;
 	int s_x = x - radius_x, s_y = y - radius_y;
@@ -34,26 +34,14 @@ __global__ void convolution(unsigned char* src, int w, int h, char* convo, int c
 		}
 		s_y -= convo_h;
 		s_x++;
-	}/*
-	int ppp = 0;
-	for(int yyy = y - radius_y; yyy <= y + radius_y; yyy++){
-		for(int xxx = x - radius_x; xxx <= x + radius_x; xxx++){
-			if(xxx < 0 || xxx >= w || yyy < 0 || yyy >= h){
-				ppp++;
-				continue;
-			}
-			computed_weigth += convo[ppp];
-			computed_pixel += convo[ppp++] * src[xxx + yyy*w];
-		}
-	}*/
-	if(normalize){
-		int val = computed_weigth > 0 ? computed_pixel / computed_weigth : computed_pixel;
-		dst[x + y * w] = val;
-	} else{
-		dst[x + y * w] = computed_pixel;
 	}
+	int val = computed_weigth > 0 ? computed_pixel / computed_weigth : computed_pixel;
+	dst[pos(x,y)] = val;
+
 }
 
+
+// l - light
 __global__ void sobel(unsigned char* l, unsigned char* magnitude, unsigned char* direction, int w, int h){
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -61,13 +49,13 @@ __global__ void sobel(unsigned char* l, unsigned char* magnitude, unsigned char*
 	if (x < 1 || y < 1) return;
 
 	int dx = 0
-	+ l[(x - 1) + w * (y - 1)] - l[(x + 1) + w * (y - 1)]
-	+ 2*l[(x - 1) + w * (y + 0)] - 2*l[(x + 1) + w * (y + 0)]
-	+ l[(x - 1) + w * (y + 1)] - l[(x + 1) + w * (y + 1)];
+	+ l[pos(x-1, y-1)] - l[pos(x+1, y-1)]
+	+ 2*l[pos(x-1, y)] - 2*l[pos(x+1, y)]
+	+ l[pos(x-1, y+1)] - l[pos(x+1, y+1)];
 
 	int dy = 0
-	+ l[(x - 1) + w * (y - 1)] + 2*l[(x + 0) + w * (y - 1)] + l[(x + 1) + w * (y - 1)]
-	- l[(x - 1) + w * (y + 1)] - 2*l[(x + 0) + w * (y + 1)] - l[(x + 1) + w * (y + 1)];
+	+ l[pos(x-1, y-1)] + 2*l[pos(x, y-1)] + l[pos(x+1, y-1)]
+	- l[pos(x-1, y+1)] - 2*l[pos(x, y+1)] - l[pos(x+1, y+1)];
 
 	int mag = sqrt((double)dx*dx + dy*dy);
 	int dir = atan((double)dy/dx);
@@ -104,13 +92,49 @@ __global__ void suppression(unsigned char* magnitude, unsigned char* direction, 
 
 }
 
+__global__ void threshold(unsigned char* magnitude, unsigned char* label, unsigned char low, unsigned char high, int w, int h){
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	if (x >= w || y >= h) return;
+	int value = magnitude[pos(x,y)];
+	if(value >= high) label[pos(x,y)] = 255;
+	else if (value >= low) label[pos(x,y)] = 127;
+	else label[pos(x,y)] = 0;
+}
+
+__global__ void mask(unsigned char* magnitude, unsigned char* mask, int w, int h){
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	if (x >= w || y >= h) return;
+	int value = mask[pos(x,y)];
+	if(value!=255) magnitude[pos(x,y)] = 0;
+}
+
+__global__ void transpose(unsigned char* in, unsigned char* out, int w, int h){
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	if (x >= w || y >= h) return;
+	out[y + x * h] = in[pos(x,y)];
+}
+
+__global__ void cc(unsigned char* label, int w, int h){
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	if (x >= w) return;
+	for(int y = 1; y < h; y++){
+		if(label[pos(x, y-1)] == 255 && label[pos(x,y)] == 127) label[pos(x,y)] = 255;
+	}
+	for(int y = h - 1; y > 0; y--){
+		if(label[pos(x, y)] == 255 && label[pos(x, y-1)] == 127) label[pos(x, y-1)] = 255;
+	}
+}
+
 __global__ void to_gray(unsigned char* red, unsigned char* green, unsigned char* blue, unsigned char* dst, int w, int h){
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (x >= w || y >= h) return;
-	int r = 0.2989 * red[x + y * w];
-	int g = 0.5870 * green[x + y * w];
-	int b = 0.1140 * blue[x + y * w];
+	int r = 0.2989 * red[pos(x,y)];
+	int g = 0.5870 * green[pos(x,y)];
+	int b = 0.1140 * blue[pos(x,y)];
 	dst[x + y * w] = r+g+b;
 
 }
