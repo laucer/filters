@@ -142,6 +142,12 @@ unsigned char* to_gray(unsigned char* red, unsigned char* green, unsigned char* 
 
   unsigned char* result = new unsigned char[w*h];
   cuMemcpyDtoH(result, dev_light, w*h);
+
+  cuMemFree(dev_red);
+  cuMemFree(dev_green);
+  cuMemFree(dev_blue);
+  cuMemFree(dev_light);
+
   return result;
 }
 
@@ -157,6 +163,10 @@ void alternative_sobel(unsigned char* lum, unsigned char* mag, unsigned char* di
 
   cuMemcpyDtoH(mag, dev_mag, w*h);
   cuMemcpyDtoH(dir, dev_dir, w*h);
+
+  cuMemFree(dev_light);
+  cuMemFree(dev_mag);
+  cuMemFree(dev_dir);
 }
 
 unsigned char* suppression(unsigned char* mag, unsigned char* dir, int w, int h){
@@ -172,6 +182,11 @@ unsigned char* suppression(unsigned char* mag, unsigned char* dir, int w, int h)
 
   unsigned char* result = new unsigned char[w*h];
   cuMemcpyDtoH(result, dev_res, w*h);
+
+  cuMemFree(dev_res);
+  cuMemFree(dev_mag);
+  cuMemFree(dev_dir);
+
   return result;
 }
 
@@ -185,6 +200,10 @@ unsigned char* threshold(unsigned char* mag, int w, int h, unsigned char low, un
 
   unsigned char* result = new unsigned char[w*h];
   cuMemcpyDtoH(result, dev_res, w*h);
+
+  cuMemFree(dev_mag);
+  cuMemFree(dev_res);
+
   return result;
 }
 
@@ -218,5 +237,10 @@ unsigned char* hysteresis(unsigned char* magnitude, unsigned char* label, int w,
 
   unsigned char* result = new unsigned char[w*h];
   cuMemcpyDtoH(result, dev_mag, w*h);
+
+  cuMemFree(dev_label);
+  cuMemFree(dev_label_trans);
+  cuMemFree(dev_mag);
+
   return result;
 }
